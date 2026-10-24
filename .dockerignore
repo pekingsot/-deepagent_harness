@@ -1,0 +1,8 @@
+.venv
+.uv-cache
+.runtime
+**/__pycache__
+.git
+.env
+work
+outputs

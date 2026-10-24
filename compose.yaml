@@ -1,0 +1,14 @@
+services:
+  api:
+    build:
+      context: .
+      dockerfile: apps/api/Dockerfile
+    ports:
+      - "8000:8000"
+  worker:
+    profiles: [worker]
+    build:
+      context: .
+      dockerfile: apps/worker/Dockerfile
+    # Scaffold worker exits until a queue adapter is connected.
+    restart: "no"

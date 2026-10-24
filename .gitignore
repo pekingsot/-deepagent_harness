@@ -1,0 +1,31 @@
+.venv/
+.runtime/
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.env
+var/
+dist/
+work/
+outputs/
+.uv-cache/
+
+# Local IDE settings
+.idea/
+.vscode/
+
+# Environment files and credentials
+.env.*
+!.env.example
+*.pem
+*.key
+
+# Build and test artifacts
+build/
+*.egg-info/
+.coverage
+.coverage.*
+htmlcov/
+coverage.xml
