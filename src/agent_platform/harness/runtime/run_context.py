@@ -2,4 +2,14 @@
 
 from agent_platform.domain.common.models import RunContext
 
-__all__ = ["RunContext"]
+
+def checkpoint_thread(context: RunContext) -> str:
+    return ":".join(
+        (
+            context.tenant_id,
+            context.project_id,
+            context.user_id,
+            str(context.thread_id),
+            str(context.run_id)
+        )
+    )

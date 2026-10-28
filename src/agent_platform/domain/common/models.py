@@ -11,8 +11,8 @@ class StrictModel(BaseModel):
 
 
 class Principal(StrictModel):
-    tenant_id: Identifier
-    user_id: Identifier
+    tenant_id: Annotated[int, Field(gt=0, le=9223372036854775807)]
+    user_id: Annotated[int, Field(gt=0, le=9223372036854775807)]
     project_id: Identifier
 
 
@@ -20,12 +20,7 @@ class RunContext(Principal):
     run_id: UUID = Field(default_factory=uuid4)
     thread_id: UUID = Field(default_factory=uuid4)
     trace_id: UUID = Field(default_factory=uuid4)
-    agent_version: str = "1.0.0"
-    policy_version: str = "1.0.0"
 
-    @property
-    def checkpoint_thread(self) -> str:
-        return f"{self.tenant_id}:{self.project_id}:{self.user_id}:{self.thread_id}"
 
 
 class NotFoundError(Exception):

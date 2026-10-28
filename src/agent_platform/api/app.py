@@ -6,11 +6,10 @@ from fastapi import FastAPI
 from agent_platform.api.routes.v1 import router as api_router
 from agent_platform.api.routes.v1.health import router as health_router
 from agent_platform.bootstrap.lifespan import lifespan
-from agent_platform.bootstrap.settings import Settings
-
+from agent_platform.bootstrap.settings import get_settings
 
 def create_app() -> FastAPI:
-    settings = Settings()
+    settings = get_settings()
     app = FastAPI(title=settings.app_name, version="0.1.0", lifespan=lifespan)
     app.include_router(health_router)
     app.include_router(api_router)
@@ -18,7 +17,7 @@ def create_app() -> FastAPI:
 
 
 def main() -> None:
-    settings = Settings()
+    settings = get_settings()
     uvicorn.run(
         "agent_platform.api.app:create_app",
         factory=True, host=settings.host, port=settings.port,
