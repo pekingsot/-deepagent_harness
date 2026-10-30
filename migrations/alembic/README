@@ -1,0 +1,9 @@
+Generic single-database configuration.
+
+
+···创建版本号 替换引号里的内容
+uv run alembic revision --autogenerate -m "create_agent_tasks"
+
+··· 更新最新的版本号
+uv run alembic upgrade head
+
