@@ -52,13 +52,11 @@ def get_principal(
     return settings.development_principal
 
 
-def get_user_memory_application_service(
-    container: Annotated[Container, Depends(get_container)],
-) -> UserMemoryApplicationService:
-    """只有接口实际依赖记忆服务时才组装，不向应用层传递 Request 或 Container。"""
+def get_user_memory_application_service() -> UserMemoryApplicationService:
+    """按需装配记忆服务，会话工厂已经由 API 中间件绑定。"""
     from agent_platform.bootstrap.wiring import create_user_memory_application_service
 
-    return create_user_memory_application_service(container.database)
+    return create_user_memory_application_service()
 
 
 type CurrentContainer = Annotated[Container, Depends(get_container)]
@@ -68,11 +66,17 @@ type CurrentUserMemoryApplicationService = Annotated[
 ]
 
 
-def get_task_application_service() -> AgentTaskApplicationService:
-    """通过无参工厂取得服务，路由不参与依赖装配。"""
-    from agent_platform.bootstrap.wiring import get_agent_task_application_service
+def get_task_application_service(
+    container: CurrentContainer,
+) -> AgentTaskApplicationService:
+    """在接口边界取得已装配的运行器，再交给装配工厂。"""
+    from agent_platform.bootstrap.wiring import (
+        get_agent_task_application_service,
+    )
 
-    return get_agent_task_application_service()
+    return get_agent_task_application_service(
+        runtime=container.runtime,
+    )
 
 
 type CurrentTaskApplicationService = Annotated[

@@ -2,18 +2,18 @@
 
 import math
 
-from sqlalchemy import select
-from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
+from sqlalchemy import delete, select, update
+from sqlalchemy_transactional.asyncio import current_session
 
 from agent_platform.domain.repositories.user_memory_repository import MemoryRepository
 from agent_platform.domain.types.common import Principal
 from agent_platform.domain.types.memory_match import MemoryMatch
+from agent_platform.domain.types.user_memory import UserMemory
 from agent_platform.infrastructure.persistence.entities import UserMemoryRecord
 
 
 class PostgresMemoryRepository(MemoryRepository):
-    def __init__(self, session_factory: async_sessionmaker[AsyncSession]) -> None:
-        self._session_factory = session_factory
+    """使用应用层事务绑定的 Session，不自行创建或提交事务。"""
 
     @staticmethod
     def _validate_vector(vector: list[float]) -> None:
@@ -53,12 +53,10 @@ class PostgresMemoryRepository(MemoryRepository):
             embedding_model=embedding_model,
         )
 
-        async with self._session_factory.begin() as session:
-            session.add(memory)
-            await session.flush()
-            memory_id = memory.id
-
-        return memory_id
+        session = current_session()  # 复用调用方事务中的 Session
+        session.add(memory)
+        await session.flush()  # 获取生成的编号，提交由应用层事务负责
+        return memory.id
 
     async def search(
         self,
@@ -91,14 +89,87 @@ class PostgresMemoryRepository(MemoryRepository):
             .limit(limit)
         )
 
-        async with self._session_factory() as session:
-            result = await session.execute(statement)
+        session = current_session()
+        result = await session.execute(statement)
 
-            return [
-                MemoryMatch(
-                    id=memory_id,
-                    content=content,
-                    similarity=float(similarity),
-                )
-                for memory_id, content, similarity in result
-            ]
+        return [
+            MemoryMatch(
+                id=memory_id,
+                content=content,
+                similarity=float(similarity),
+            )
+            for memory_id, content, similarity in result
+        ]
+
+    async def delete(
+        self,
+        *,
+        principal: Principal,
+        memory_id: int,
+    ) -> bool:
+        """删除范围始终限制在当前租户、当前用户。"""
+        statement = (
+            delete(UserMemoryRecord)
+            .where(
+                UserMemoryRecord.id == memory_id,
+                UserMemoryRecord.tenant_id == principal.tenant_id,
+                UserMemoryRecord.user_id == principal.user_id,
+            )
+            .returning(UserMemoryRecord.id)
+        )
+
+        # 删除在调用方事务中执行，仓储不独立提交。
+        session = current_session()
+        result = await session.execute(statement)
+        return result.scalar_one_or_none() is not None
+
+    async def update(
+        self,
+        *,
+        principal: Principal,
+        memory_id: int,
+        content: str,
+        embedding: list[float],
+        embedding_model: str,
+    ) -> bool:
+        """更新原记录，正文和向量一起写入调用方事务。"""
+        self._validate_vector(embedding)
+        statement = (
+            update(UserMemoryRecord)
+            .where(
+                UserMemoryRecord.id == memory_id,
+                UserMemoryRecord.tenant_id == principal.tenant_id,
+                UserMemoryRecord.user_id == principal.user_id,
+            )
+            .values(
+                content=content,
+                embedding=embedding,
+                embedding_model=embedding_model,
+            )
+            .returning(UserMemoryRecord.id)
+        )
+        result = await current_session().execute(statement)
+        return result.scalar_one_or_none() is not None
+
+    async def list_recent(
+        self,
+        *,
+        principal: Principal,
+        before_id: int | None,
+        limit: int,
+    ) -> list[UserMemory]:
+        """按游标读取当前用户的记忆，不使用语义召回代替列表。"""
+        statement = select(
+            UserMemoryRecord.id,
+            UserMemoryRecord.content,
+            UserMemoryRecord.created_at,
+            UserMemoryRecord.updated_at,
+        ).where(
+            UserMemoryRecord.tenant_id == principal.tenant_id,
+            UserMemoryRecord.user_id == principal.user_id,
+        )
+        if before_id is not None:
+            statement = statement.where(UserMemoryRecord.id < before_id)
+        statement = statement.order_by(UserMemoryRecord.id.desc()).limit(limit)
+        result = await current_session().execute(statement)
+        return [UserMemory.model_validate(dict(row)) for row in result.mappings()]

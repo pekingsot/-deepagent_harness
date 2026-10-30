@@ -43,25 +43,36 @@ from agent_platform.infrastructure.persistence.repositories.agent_task_repositor
 from agent_platform.infrastructure.persistence.repositories.user_memory_repository import (
     PostgresMemoryRepository,
 )
+from agent_platform.infrastructure.harness.tools.builtins.user_memory import (
+    create_user_memory_tools,
+)
 
-
-def create_user_memory_application_service(database: Database) -> UserMemoryApplicationService:
-    """按需组装记忆服务，复用数据库资源和当前进程的向量模型。"""
+def create_user_memory_application_service() -> UserMemoryApplicationService:
+    """装配记忆服务，仓储从入口绑定的事务上下文取得 Session。"""
     from agent_platform.infrastructure.embeddings.bge import get_embeddings
 
     embeddings = get_embeddings()
     return UserMemoryApplicationService(
-        repository=PostgresMemoryRepository(database.session_factory),
+        repository=PostgresMemoryRepository(),
         embeddings=embeddings,
         embedding_model=embeddings.model_name,
     )
 
 
 @lru_cache(maxsize=1)
-def _build_runtime(checkpointer: BaseCheckpointSaver[Any]) -> AgentTaskRuntime:
+def _build_runtime(
+    checkpointer: BaseCheckpointSaver[Any],
+) -> AgentTaskRuntime:
+    # 服务不持有 Session，由 API 或 Worker 入口绑定会话工厂。
+    memory_service = create_user_memory_application_service()
+    memory_tools = create_user_memory_tools(memory_service)
+
     agents: dict[str, BaseAgent] = {
         TaskPlanningAgent.name: TaskPlanningAgent(
-            tools=[ask_user],
+            tools=[
+                ask_user,
+                *memory_tools,
+            ],
             checkpointer=checkpointer,
         ),
         ResearcherAgent.name: ResearcherAgent(
@@ -96,18 +107,16 @@ def get_task_events() -> RedisTaskEvents:
 
 
 @lru_cache(maxsize=1)
-def get_agent_task_application_service() -> AgentTaskApplicationService:
-    """无参获取任务服务，具体依赖仅在装配层创建。"""
-    settings = get_settings()
-    checkpointer = (
-        get_redis_checkpointer()
-        if settings.checkpoint_backend == "redis"
-        else get_postgres_checkpoint().saver
-    )
+def get_agent_task_application_service(
+    runtime: AgentTaskRuntime,
+) -> AgentTaskApplicationService:
+    """应用服务使用已装配好的执行接口，不重复构建运行器。"""
     return AgentTaskApplicationService(
-        tasks=AgentTaskDomainService(PostgresAgentTaskRepository()),
+        tasks=AgentTaskDomainService(
+            PostgresAgentTaskRepository(),
+        ),
         queue=get_task_queue(),
-        runtime=_build_runtime(checkpointer),
+        runtime=runtime,
         events=get_task_events(),
     )
 

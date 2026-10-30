@@ -17,11 +17,11 @@ logger = logging.getLogger(__name__)
 
 class AgentTaskWorker:
     def __init__(
-        self,
-        *,
-        session_factory: async_sessionmaker[AsyncSession],
-        queue: JobQueue,
-        service: AgentTaskApplicationService,
+            self,
+            *,
+            session_factory: async_sessionmaker[AsyncSession],
+            queue: JobQueue,
+            service: AgentTaskApplicationService,
     ) -> None:
         self._session_factory = session_factory  # 消费者上下文使用的会话工厂
         self._queue = queue  # 任务队列接口
@@ -98,7 +98,7 @@ async def _run() -> None:
         worker = AgentTaskWorker(
             session_factory=container.database.session_factory,
             queue=get_task_queue(),
-            service=get_agent_task_application_service(),
+            service=get_agent_task_application_service(runtime=container.runtime),
         )
         async with start_workers(consume=worker.consume, concurrency=1):
             await asyncio.Event().wait()

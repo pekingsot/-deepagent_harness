@@ -27,7 +27,9 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
                     worker = AgentTaskWorker(
                         session_factory=container.database.session_factory,
                         queue=get_task_queue(),
-                        service=get_agent_task_application_service(),
+                        service=get_agent_task_application_service(
+                            runtime=container.runtime,
+                        ),
                     )
                     await stack.enter_async_context(
                         start_workers(consume=worker.consume, concurrency=1)
