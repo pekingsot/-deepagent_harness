@@ -4,9 +4,9 @@ from uuid import UUID
 from langchain_core.runnables import RunnableConfig
 from langgraph.types import Command
 
-from agent_platform.domain.common.models import RunContext
-from agent_platform.harness.agents import OrchestratorAgent
-from agent_platform.harness.tools.builtins.ask_user import ask_user
+from agent_platform.domain.types.common import TaskContext
+from agent_platform.infrastructure.harness.agents import TaskPlanningAgent
+from agent_platform.infrastructure.harness.tools.builtins.ask_user import ask_user
 from agent_platform.infrastructure.cache.redis import get_redis
 from agent_platform.infrastructure.checkpoint.redis_checkpoint import (
     get_redis_checkpointer,
@@ -15,12 +15,12 @@ from agent_platform.infrastructure.checkpoint.redis_checkpoint import (
 
 async def main() -> None:
     # 与启动脚本保持相同的身份和线程。
-    context = RunContext(
+    context = TaskContext(
         tenant_id="local",
         user_id="developer",
         project_id="demo",
         thread_id=UUID(int=1001),
-        run_id=UUID(int=1001),
+        task_id=UUID(int=1001),
     )
 
     config: RunnableConfig = {
@@ -38,7 +38,7 @@ async def main() -> None:
         await checkpointer.asetup()
 
         # 新进程重新构建相同的图。
-        agent = OrchestratorAgent(
+        agent = TaskPlanningAgent(
             tools=[ask_user],
         )
         graph = agent.build(context)

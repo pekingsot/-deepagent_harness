@@ -1,7 +1,7 @@
 import asyncio
 
 from agent_platform.bootstrap.settings import get_settings
-from agent_platform.infrastructure.checkpoint.posgres_checkpoint import (
+from agent_platform.infrastructure.checkpoint.postgres_checkpoint import (
     get_postgres_checkpoint,
 )
 

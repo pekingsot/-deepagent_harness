@@ -1,4 +1,4 @@
-"""Standard-library structure checks; no external services required."""
+"""检查目录、领域依赖和 Agent 资源，不连接外部服务。"""
 
 import ast
 import tomllib
@@ -21,15 +21,34 @@ def main() -> None:
                     modules = [node.module or ""]
                 else:
                     continue
-                assert all(not module.startswith(
-                    ("fastapi", "sqlalchemy", "deepagents", "langchain", "langgraph")
-                ) for module in modules), f"Domain dependency violation: {path}"
-    for agent in ("orchestrator", "researcher", "coder", "reviewer"):
-        base = root / "src/agent_platform/harness/agents" / agent
-        for file in ("definition.py", "system_prompt.md", "tools.py", "middleware.py", "backend.py"):
+                assert all(
+                    not module.startswith(
+                        ("fastapi", "sqlalchemy", "deepagents", "langchain", "langgraph")
+                    )
+                    for module in modules
+                ), f"Domain dependency violation: {path}"
+    for agent in ("task_planning", "researcher", "coder", "reviewer"):
+        base = root / "src/agent_platform/infrastructure/harness/agents" / agent
+        for file in ("agent.py", "system_prompt.md"):
             assert (base / file).is_file(), f"Missing {agent}/{file}"
         assert list((base / "skills").glob("*/SKILL.md"))
-    print(f"Scaffold structure and {count} Python source files checked.")
+    for file in (
+        "application/services/user_memory_application_service.py",
+        "application/services/agent_task_application_service.py",
+        "domain/aggregates/agent_task.py",
+        "domain/services/agent_task_domain_service.py",
+        "domain/types/common.py",
+        "domain/types/memory_match.py",
+        "domain/repositories/user_memory_repository.py",
+        "domain/repositories/agent_task_repository.py",
+        "infrastructure/persistence/repositories/user_memory_repository.py",
+        "interface/api/app.py",
+    ):
+        assert (root / "src/agent_platform" / file).is_file(), f"Missing {file}"
+    for entrypoint in config["project"]["scripts"].values():
+        module = entrypoint.split(":", 1)[0]
+        assert (root / "src" / Path(*module.split("."))).with_suffix(".py").is_file()
+    print(f"目录和 {count} 个 Python 源文件检查通过。")
 
 
 if __name__ == "__main__":

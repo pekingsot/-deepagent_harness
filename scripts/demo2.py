@@ -7,22 +7,22 @@ from langchain_core.messages import ToolMessage
 from langchain_core.runnables import RunnableConfig
 from langgraph.types import Command
 
-from agent_platform.domain.common.models import RunContext
-from agent_platform.harness.agents import OrchestratorAgent
-from agent_platform.harness.middleware.human_approval import (
+from agent_platform.domain.types.common import TaskContext
+from agent_platform.infrastructure.harness.agents import TaskPlanningAgent
+from agent_platform.infrastructure.harness.middleware.human_approval import (
     HumanApprovalMiddleware,
     ToolApprovalRejectedError,
 )
 
 
 async def main() -> None:
-    context = RunContext(
+    context = TaskContext(
         tenant_id="local",
         user_id="developer",
         project_id="demo",
     )
 
-    agent = OrchestratorAgent(
+    agent = TaskPlanningAgent(
         middleware=[
             HumanApprovalMiddleware(
                 approval_tools={"write_todos"},

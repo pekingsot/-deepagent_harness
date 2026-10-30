@@ -4,18 +4,18 @@ import sys
 from langchain_core.runnables import RunnableConfig
 from langgraph.types import Command
 
-from agent_platform.domain.common.models import RunContext
-from agent_platform.harness.agents import OrchestratorAgent
-from agent_platform.harness.tools.builtins.ask_user import ask_user
+from agent_platform.domain.types.common import TaskContext
+from agent_platform.infrastructure.harness.agents import TaskPlanningAgent
+from agent_platform.infrastructure.harness.tools.builtins.ask_user import ask_user
 
 async def main() -> None:
-    context = RunContext(
+    context = TaskContext(
         tenant_id="local",
         user_id="developer",
         project_id="demo",
     )
 
-    agent = OrchestratorAgent(
+    agent = TaskPlanningAgent(
         tools=[ask_user],
     )
     graph = agent.build(context)

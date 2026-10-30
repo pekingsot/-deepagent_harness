@@ -9,8 +9,8 @@ worker:
 
 check:
 	uv run python scripts/check_structure.py
-	uv run python -m unittest discover -s tests/unit -v
-	uv run ruff check .
+	uv run pytest tests -q
+	uv run ruff check src tests migrations scripts/check_structure.py
 	uv run mypy
 
 upgrade:

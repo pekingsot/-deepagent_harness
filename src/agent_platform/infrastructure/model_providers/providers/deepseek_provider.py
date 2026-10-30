@@ -6,8 +6,8 @@ from langchain_core.language_models import BaseChatModel
 from langchain_openai import ChatOpenAI
 from pydantic_settings import SettingsConfigDict
 
-from agent_platform.domain.common.models import RunContext
-from agent_platform.infrastructure.model_providers.factory import ModelProvider
+from agent_platform.domain.types.common import TaskContext
+from agent_platform.infrastructure.model_providers.base import ModelProvider
 
 
 class DeepSeekProvider(ModelProvider):
@@ -23,9 +23,8 @@ class DeepSeekProvider(ModelProvider):
             # max_retries=self.max_retries,
             use_responses_api=False,
             temperature=0.7,
-
         )
 
-    def get_model(self, context: RunContext | None = None) -> BaseChatModel:
+    def get_model(self, context: TaskContext | None = None) -> BaseChatModel:
         # This provider owns a single platform connection; profile/context do not select it.
         return self._client

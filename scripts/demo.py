@@ -5,9 +5,9 @@ import logging
 import sys
 from langchain_core.messages import AIMessage, ToolMessage
 
-from agent_platform.domain.common.models import RunContext
-from agent_platform.harness.agents import OrchestratorAgent
-from agent_platform.harness.middleware.custom_model_call_limit import ModelCallLimitExceededError
+from agent_platform.domain.types.common import TaskContext
+from agent_platform.infrastructure.harness.agents import TaskPlanningAgent
+from agent_platform.infrastructure.harness.middleware.custom_model_call_limit import ModelCallLimitExceededError
 from agent_platform.infrastructure.model_providers.providers.deepseek_provider import (
     DeepSeekProvider,
 )
@@ -16,9 +16,9 @@ from langchain.agents.middleware import TodoListMiddleware
 
 async def main() -> None:
     # Local test identity only; production context must come from verified server identity.
-    context = RunContext(tenant_id="local", user_id="developer", project_id="demo")
-    # 模型由 OrchestratorAgent 自己选择
-    agent = OrchestratorAgent()
+    context = TaskContext(tenant_id="local", user_id="developer", project_id="demo")
+    # 模型由 TaskPlanningAgent 自己选择
+    agent = TaskPlanningAgent()
     graph = agent.build(context)
 
     task = """

@@ -39,17 +39,23 @@ dependencies = [
     "ipykernel>=7.4.0",
     "sentence-transformers>=6.2.0",
     "torch>=2.6",
+    "redis>=8.1.0",
+    "sqlalchemy-transactional>=1.0.3",
+    "sse-starlette>=3.6.0",
 ]
 
 [project.optional-dependencies]
 postgres = ["psycopg[binary,pool]>=3,<4", "langgraph-checkpoint-postgres>=3,<4"]
+redis = [
+    "redis>=5.0.0",
+]
 
 [dependency-groups]
 dev = ["pytest>=9.1.1,<10", "ruff>=0.17.2,<1", "mypy>=1,<2", "types-PyYAML>=6"]
 
 [project.scripts]
-harness-api = "agent_platform.api.app:main"
-harness-worker = "agent_platform.workers.run_worker:main"
+harness-api = "agent_platform.interface.api.app:main"
+harness-worker = "agent_platform.workers.agent_task_worker:main"
 
 [tool.hatch.build.targets.wheel]
 packages = ["src/agent_platform"]

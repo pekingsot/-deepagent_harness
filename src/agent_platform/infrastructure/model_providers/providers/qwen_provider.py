@@ -2,7 +2,7 @@
 
 from pydantic_settings import SettingsConfigDict
 
-from agent_platform.infrastructure.model_providers.providers.opanai_provider import OpenAIProvider
+from agent_platform.infrastructure.model_providers.providers.openai_provider import OpenAIProvider
 
 
 class QwenProvider(OpenAIProvider):

@@ -1,4 +1,5 @@
 """本地 BGE 中文向量模型。"""
+
 from functools import lru_cache
 from pathlib import Path
 from threading import Lock
@@ -17,9 +18,7 @@ class BgeEmbeddings(Embeddings):
     def __init__(
         self,
         *,
-        model_path: Path = (
-            PROJECT_ROOT / "models" / "BAAI" / "bge-large-zh-v1.5"
-        ),
+        model_path: Path = (PROJECT_ROOT / "models" / "BAAI" / "bge-large-zh-v1.5"),
         device: str = "cpu",
     ) -> None:
         if not model_path.is_dir():
@@ -34,9 +33,7 @@ class BgeEmbeddings(Embeddings):
 
         dimension = self._model.get_embedding_dimension()
         if dimension != 1024:
-            raise ValueError(
-                f"向量模型必须输出 1024 维，实际为：{dimension}"
-            )
+            raise ValueError(f"向量模型必须输出 1024 维，实际为：{dimension}")
 
     def embed_documents(self, texts: list[str]) -> list[list[float]]:
         """为待保存的记忆内容生成向量。"""
@@ -68,5 +65,6 @@ class BgeEmbeddings(Embeddings):
 
 
 @lru_cache(maxsize=1)
-def get_embeddings():
+def get_embeddings() -> BgeEmbeddings:
+    """获取当前进程复用的模型；启动阶段先完成加载。"""
     return BgeEmbeddings()

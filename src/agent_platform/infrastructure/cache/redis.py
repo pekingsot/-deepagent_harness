@@ -4,15 +4,13 @@ from functools import lru_cache
 
 from redis.asyncio import Redis as AsyncRedis
 
-from agent_platform.bootstrap.settings import get_settings, Settings
-
 logger = logging.getLogger(__name__)
 
 
 class RedisClient:
     """Redis客户端，用于完成redis缓存连接&使用"""
 
-    def __init__(self)->None:
+    def __init__(self) -> None:
         """构造函数，完成redis客户端的创建"""
         self._client: AsyncRedis | None = None
 
@@ -22,7 +20,7 @@ class RedisClient:
         if self._client is not None:
             return
         # 2.创建redis客户端
-        url=os.environ.get("REDIS_URL","")
+        url = os.environ.get("REDIS_URL", "")
         if not url.strip():
             raise ValueError("REDIS_URL 不能为空")
 
@@ -38,11 +36,11 @@ class RedisClient:
         self._client = client
         logger.info("redis客户端初始化成功")
 
-    async def shutdown(self)->None:
+    async def shutdown(self) -> None:
         """关闭redis时执行的操作"""
         # 1.客户端存在则关闭客户端并提示
         if self._client is not None:
-            await  self._client.aclose()
+            await self._client.aclose()
             self._client = None
             logger.info("Redis客户端成功关闭")
         # 2.清除缓存
