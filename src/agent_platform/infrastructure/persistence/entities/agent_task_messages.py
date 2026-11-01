@@ -33,7 +33,7 @@ class AgentTaskMessageRecord(BaseTable):
             name="ck_agent_task_messages_role",
         ),
         CheckConstraint(
-            "state IN ('pending', 'processing', 'applied', 'failed')",
+            "state IN ('pending', 'processing', 'applied', 'failed', 'cancelled')",
             name="ck_agent_task_messages_state",
         ),
     )
@@ -67,7 +67,7 @@ class AgentTaskMessageRecord(BaseTable):
     state: Mapped[str] = mapped_column(
         String(16),
         nullable=False,
-    )  # 待处理、处理中、已处理或失败
+    )  # 待处理、处理中、已处理、失败或取消
 
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True),

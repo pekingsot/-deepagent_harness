@@ -9,6 +9,20 @@ import pytest
 SOURCE_ROOT = Path(__file__).resolve().parents[2] / "src" / "agent_platform"
 
 
+def test_supported_python_version() -> None:
+    project = SOURCE_ROOT.parents[1]
+    config = tomllib.loads((project / "pyproject.toml").read_text(encoding="utf-8"))
+    assert config["project"]["requires-python"] == ">=3.12,<3.13"
+
+
+@pytest.mark.parametrize("agent", ["task_planning", "researcher", "coder", "reviewer"])
+def test_agent_resources_are_packaged_with_agent(agent: str) -> None:
+    directory = SOURCE_ROOT / "infrastructure" / "harness" / "agents" / agent
+    assert (directory / "agent.py").is_file()
+    assert (directory / "system_prompt.md").is_file()
+    assert list((directory / "skills").glob("*/SKILL.md"))
+
+
 @pytest.mark.parametrize(
     ("layer", "forbidden"),
     [
@@ -63,3 +77,52 @@ def test_console_entrypoints_resolve_after_moves() -> None:
         module = entrypoint.split(":", 1)[0]
         path = project / "src" / Path(*module.split("."))
         assert path.with_suffix(".py").is_file(), entrypoint
+
+
+@pytest.mark.parametrize(
+    ("layer", "forbidden"),
+    [
+        (
+            "domain",
+            {
+                "sqlalchemy",
+                "sqlalchemy_transactional",
+                "fastapi",
+                "redis",
+                "psycopg",
+                "deepagents",
+                "langgraph",
+                "langchain",
+                "langchain_core",
+            },
+        ),
+        # 应用层有意保留事务传播库，禁止依赖具体数据库、传输和 Agent SDK。
+        (
+            "application",
+            {
+                "sqlalchemy",
+                "fastapi",
+                "redis",
+                "psycopg",
+                "deepagents",
+                "langgraph",
+                "langchain",
+                "langchain_core",
+            },
+        ),
+    ],
+)
+def test_business_layers_do_not_import_technical_frameworks(layer, forbidden):
+    violations = []
+    for path in (SOURCE_ROOT / layer).rglob("*.py"):
+        for node in ast.walk(ast.parse(path.read_text(encoding="utf-8-sig"))):
+            if isinstance(node, ast.ImportFrom):
+                modules = [node.module or ""]
+            elif isinstance(node, ast.Import):
+                modules = [alias.name for alias in node.names]
+            else:
+                continue
+            for module in modules:
+                if module.split(".")[0] in forbidden:
+                    violations.append(f"{path.relative_to(SOURCE_ROOT)}:{node.lineno}: {module}")
+    assert not violations, "\n".join(violations)

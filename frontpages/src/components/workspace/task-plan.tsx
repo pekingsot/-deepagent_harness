@@ -22,6 +22,7 @@ export function TaskPlan({ task, onRetry }: { task: LocalTask; onRetry: () => vo
       {items && items.length > 0 && <span className="ml-auto whitespace-nowrap text-[10px] font-normal text-muted-foreground">{completed} / {items.length} 项完成</span>}
     </div>
 
+    {["cancelling", "cancelled"].includes(task.status) && <p role="status" className="text-xs text-muted-foreground">{task.status === "cancelling" ? "正在停止执行" : "执行已停止"}；以下保留最后收到的计划，不代表未完成步骤还在运行。</p>}
     {task.planError && <div role="alert" className="rounded-xl border border-amber-200 bg-amber-50 p-3 text-xs leading-6 text-amber-900">
       <p>计划读取失败：{task.planError}</p>
       <Button variant="ghost" size="sm" className="mt-1" onClick={onRetry}>重新读取</Button>
@@ -38,7 +39,7 @@ export function TaskPlan({ task, onRetry }: { task: LocalTask; onRetry: () => vo
             "flex items-start gap-3 rounded-xl border p-3",
             item.status === "completed" ? "border-primary/15 bg-primary/5" : "bg-background",
           )}>
-            <Icon aria-hidden="true" className={cn("mt-0.5 size-4 shrink-0", item.status === "pending" ? "text-muted-foreground" : "text-primary", item.status === "in_progress" && "animate-spin")} />
+            <Icon aria-hidden="true" className={cn("mt-0.5 size-4 shrink-0", item.status === "pending" ? "text-muted-foreground" : "text-primary", item.status === "in_progress" && active && "animate-spin")} />
             <div className="min-w-0 flex-1">
               <p className="break-words text-xs leading-6">{item.content}</p>
               <span className="mt-1 block text-[10px] text-muted-foreground">步骤 {index + 1} · {labels[item.status]}</span>

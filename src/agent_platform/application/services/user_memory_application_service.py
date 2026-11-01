@@ -1,15 +1,14 @@
 """长期记忆应用服务。"""
 
-from langchain_core.embeddings import Embeddings
-
-from agent_platform.application.dto.user_memory_dto import UserMemoryPage
-from agent_platform.domain.types.user_memory import MemoryContent
 from sqlalchemy_transactional.asyncio import transactional
 from sqlalchemy_transactional.common import Propagation
 
+from agent_platform.application.dto.user_memory_dto import UserMemoryPage
+from agent_platform.application.interfaces.text_embeddings import TextEmbeddings
 from agent_platform.domain.repositories.user_memory_repository import MemoryRepository
 from agent_platform.domain.types.common import Principal
 from agent_platform.domain.types.memory_match import MemoryMatch
+from agent_platform.domain.types.user_memory import MemoryContent
 
 
 class UserMemoryApplicationService:
@@ -19,7 +18,7 @@ class UserMemoryApplicationService:
         self,
         *,
         repository: MemoryRepository,
-        embeddings: Embeddings,
+        embeddings: TextEmbeddings,
         embedding_model: str,
     ) -> None:
         if not embedding_model.strip() or len(embedding_model) > 128:

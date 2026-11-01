@@ -1,6 +1,7 @@
-export type TaskStatus = "queued" | "running" | "waiting_human" | "succeeded" | "failed" | "cancelled";
+export type TaskStatus = "queued" | "running" | "cancelling" | "waiting_human" | "succeeded" | "failed" | "cancelled";
 
 export interface TaskResponse {
+  deletion_requested?: boolean; // 删除意图已持久化时禁止继续提交新工作
   title: string; // 会话名称，可独立于第一条消息修改
   prompt: string; // 第一条消息，用于会话摘要
   attempt: number; // 当前执行轮次，用于区分不同轮次的流式事件
@@ -16,7 +17,7 @@ export interface TaskMessage {
   id: string; // 消息唯一编号
   role: "user" | "assistant"; // 消息发送方
   content: string; // 消息正文
-  state: "pending" | "processing" | "applied" | "failed"; // 用户消息的处理情况
+  state: "pending" | "processing" | "applied" | "failed" | "cancelled"; // 消息处理或停止情况
   position: number; // 服务端生成的消息顺序
   created_at: string; // 服务端消息创建时间
 }
@@ -64,7 +65,30 @@ export interface StreamEvent {
   data: Record<string, unknown>; // 事件对应的数据
 }
 
+export interface TaskExecution {
+  attempt: number; // 所属轮次
+  title: string; // 本轮执行标题，不是会话名称
+  status: TaskStatus; // 本轮保存的业务状态
+  todos: TaskPlanItem[]; // 本轮步骤
+  output: string | null; // 此轮完整或部分结果
+  error: string | null; // 此轮失败原因
+  created_at: string; // 开始时间
+  updated_at: string; // 快照版本，避免旧查询覆盖新事件
+}
+
+export function isTaskExecution(value: unknown): value is TaskExecution {
+  if (!value || typeof value !== "object") return false;
+  const item = value as Record<string, unknown>;
+  return typeof item.attempt === "number" && Number.isInteger(item.attempt) && item.attempt >= 1 &&
+    typeof item.title === "string" && Boolean(item.title.trim()) &&
+    typeof item.status === "string" && Object.hasOwn(statusLabels, item.status) &&
+    isTaskPlanItems(item.todos) && (item.output === null || typeof item.output === "string") &&
+    (item.error === null || typeof item.error === "string") &&
+    typeof item.created_at === "string" && typeof item.updated_at === "string";
+}
+
 export interface TimelineItem {
+  attempt: number; // 动态所属轮次，历史面板只展示该轮动态
   label: string; // 包含工具或子 Agent 名称的可读事件说明
   key: string; // 列表展示的唯一编号
   event: string; // 执行事件名称
@@ -72,6 +96,7 @@ export interface TimelineItem {
 }
 
 export interface LocalTask extends TaskResponse {
+  executions: TaskExecution[]; // 按轮次保存的标题、步骤与结果
   artifacts: TaskArtifact[]; // 从执行记录读取的文本交付物
   todos: TaskPlanItem[] | null; // null 表示尚未读取，空数组表示没有结构化计划
   planError: string; // 计划读取失败的提示，不影响聊天历史展示
@@ -84,8 +109,8 @@ export interface LocalTask extends TaskResponse {
 }
 
 export const statusLabels: Record<TaskStatus, string> = {
-  queued: "排队中", running: "执行中", waiting_human: "等待你回复",
-  succeeded: "本轮完成", failed: "执行失败", cancelled: "已取消",
+  queued: "排队中", running: "执行中", cancelling: "正在停止", waiting_human: "等待你回复",
+  succeeded: "本轮完成", failed: "执行失败", cancelled: "本轮已停止",
 };
 
 export const eventLabels: Record<string, string> = {
@@ -96,7 +121,7 @@ export const eventLabels: Record<string, string> = {
   message_received: "补充信息已接收",
   queued: "任务已保存", started: "开始执行任务", waiting_human: "需要你的确认",
   resuming: "继续执行任务", completed: "任务已完成", failed: "执行失败",
-  cancelled: "任务已取消", resume_rejected: "回复未被接受", resume_error: "恢复执行异常",
+  cancelling: "已请求停止，等待执行退出", cancelled: "本轮已停止", resume_rejected: "回复未被接受", resume_error: "恢复执行异常",
 };
 
 export function isTerminal(status: TaskStatus) {

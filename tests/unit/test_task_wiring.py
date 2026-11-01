@@ -18,10 +18,15 @@ class TaskWiringTests(unittest.TestCase):
             patch.object(wiring, "get_redis_checkpointer"),
             patch.object(wiring, "get_task_queue"),
             patch.object(wiring, "get_task_events"),
-            patch.object(wiring, "_build_runtime") as runtime,
+            patch.object(wiring, "get_redis"),
+            patch.object(
+                wiring,
+                "_get_active_container",
+                return_value=SimpleNamespace(runtime=object(), execution_guard=object()),
+            ) as resources,
         ):
             first = wiring.get_agent_task_application_service()
             self.assertIs(first, wiring.get_agent_task_application_service())
-            self.assertEqual(runtime.call_count, 1)
+            self.assertEqual(resources.call_count, 1)
             wiring.get_agent_task_application_service.cache_clear()
             self.assertIsNot(first, wiring.get_agent_task_application_service())

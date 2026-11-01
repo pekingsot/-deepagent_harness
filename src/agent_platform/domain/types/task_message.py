@@ -21,7 +21,8 @@ class TaskMessage(StrictModel):
         "processing",
         "applied",
         "failed",
-    ] = "applied"  # 待处理、处理中、已处理或处理失败
+        "cancelled",
+    ] = "applied"  # 待处理、处理中、已处理、失败或用户取消
 
     position: int = 0  # 数据库生成的消息顺序，入库前默认为零
 

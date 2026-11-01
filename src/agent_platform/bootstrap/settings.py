@@ -2,10 +2,9 @@ from functools import lru_cache
 from typing import Literal
 
 from dotenv import load_dotenv
-from pydantic import Field, SecretStr
+from pydantic import Field
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
-from agent_platform.domain.types.common import Principal
 from agent_platform.paths import ENV_DIR
 
 
@@ -29,7 +28,6 @@ class Settings(BaseSettings):
         "postgresql+psycopg://pekingsot:sunset%40123@192.168.1.250:5434/agent_platform"
     )
     redis_url: str = "redis://192.168.1.250:6379/0"
-    langfuse_enabled: bool = False
     worker_enabled: bool = False  # 是否随 API 启动任务消费者
     worker_concurrency: int = Field(default=1, ge=1, le=32)  # 当前进程的消费者数量
     task_queue_stream: str = Field(
@@ -42,8 +40,6 @@ class Settings(BaseSettings):
         min_length=1,
     )  # 任务消费组
 
-    development_token: SecretStr | None = None  # 显式配置的本地联调令牌
-    development_principal: Principal | None = None  # 由服务端配置的本地联调身份
 
 
 @lru_cache(maxsize=1)

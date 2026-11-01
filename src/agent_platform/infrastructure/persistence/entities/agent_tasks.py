@@ -1,9 +1,8 @@
 from datetime import datetime
 from uuid import UUID
 
-from sqlalchemy import Uuid
-from sqlalchemy import BigInteger, CheckConstraint, DateTime, Index, String, Text
-from sqlalchemy.orm import  Mapped, mapped_column
+from sqlalchemy import BigInteger, Boolean, CheckConstraint, DateTime, Index, String, Text, Uuid
+from sqlalchemy.orm import Mapped, mapped_column
 
 from agent_platform.infrastructure.persistence.entities.base import BaseTable
 
@@ -12,6 +11,10 @@ class AgentTaskRecord(BaseTable):
     """任务业务数据映射，与领域聚合分开。"""
 
     __tablename__ = "agent_tasks"
+
+    deletion_requested: Mapped[bool] = mapped_column(
+        Boolean, nullable=False, server_default="false"
+    )  # 删除意图；清理完成后随会话物理删除
 
     __table_args__ = (
         Index(
@@ -31,12 +34,14 @@ class AgentTaskRecord(BaseTable):
         ),
         CheckConstraint(
             "status IN ("
-            "'queued', 'running', 'waiting_human', "
+            "'queued', 'running', 'cancelling', 'waiting_human', "
             "'succeeded', 'failed', 'cancelled'"
             ")",
             name="ck_agent_tasks_status",
         ),
     )
+
+    execution_id: Mapped[UUID | None] = mapped_column(Uuid, nullable=True)
 
     id: Mapped[UUID] = mapped_column(
         Uuid,
@@ -74,7 +79,9 @@ class AgentTaskRecord(BaseTable):
     )  # 执行任务的 Agent 注册名称
 
     title: Mapped[str] = mapped_column(
-        String(120), nullable=False, server_default="新会话",
+        String(120),
+        nullable=False,
+        server_default="新会话",
     )  # 会话名称，与首条输入分开保存
 
     prompt: Mapped[str] = mapped_column(

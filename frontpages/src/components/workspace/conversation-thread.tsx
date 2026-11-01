@@ -34,20 +34,24 @@ export function ConversationThread({ task }: { task: LocalTask }) {
               {item.state === "pending" && <span>已收到，等待处理</span>}
               {item.state === "processing" && <span>正在处理</span>}
               {item.state === "failed" && <span>未完成处理</span>}
+              {item.state === "cancelled" && <span>已停止处理</span>}
             </div>
             <p>{item.content}</p>
           </div>
         ) : (
           <div className="assistant-message mb-7 !pt-1" key={item.id}>
             <div className="mb-4 flex items-center gap-2.5"><span className="assistant-mark"><Sparkles className="size-4" /></span><span className="text-sm font-semibold">任务规划助手</span></div>
+            {item.state === "cancelled" && <p className="mb-3 text-xs text-muted-foreground">已停止 · 以下为停止前生成的部分内容</p>}
+            {item.state === "failed" && <p className="mb-3 text-xs text-muted-foreground">本轮失败 · 以下为失败前生成的部分内容</p>}
             <Markdown>{item.content}</Markdown>
             <Button variant="ghost" size="sm" className="mt-3" onClick={() => void copy(item.id, item.content)}>{copied === item.id ? <Check /> : <Clipboard />}{copied === item.id ? "已复制" : "复制"}</Button>
           </div>
         ))}
-        {task.status === "running" && <div className="assistant-message !pt-1">
-          <div className="mb-4 flex items-center gap-2.5"><span className="assistant-mark"><Sparkles className="size-4" /></span><span className="text-sm font-semibold">正在继续处理</span><span className="text-[10px] text-muted-foreground">第 {task.attempt} 轮</span></div>
+        {(["running", "cancelling"].includes(task.status) || (task.status === "cancelled" && task.draft && !task.messages.some((item) => item.role === "assistant" && item.state === "cancelled"))) && <div className="assistant-message !pt-1">
+          <div className="mb-4 flex items-center gap-2.5"><span className="assistant-mark"><Sparkles className="size-4" /></span><span className="text-sm font-semibold">{task.status === "running" ? "正在继续处理" : task.status === "cancelling" ? "正在停止" : "已停止 · 部分内容"}</span><span className="text-[10px] text-muted-foreground">第 {task.attempt} 轮</span></div>
           {task.draft ? <div className="streaming-text"><Markdown>{task.draft}</Markdown></div> : <p role="status" className="text-xs text-muted-foreground">正在结合当前会话内容生成回答…</p>}
         </div>}
+        {task.status === "cancelled" && <p role="status" className="mt-4 rounded-xl border bg-muted/40 p-4 text-xs text-muted-foreground">本轮已停止，可在当前会话输入新内容继续。</p>}
         {task.error && <p role="alert" className="mt-4 rounded-xl border border-red-200 bg-red-50 p-4 text-xs text-red-800">{task.error}</p>}
       </div>
     </div>

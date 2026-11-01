@@ -2,13 +2,17 @@
   "name": "agent-workspace",
   "version": "0.1.0",
   "private": true,
-  "engines": { "node": ">=20.9.0" },
+  "engines": {
+    "node": ">=20.9.0"
+  },
   "scripts": {
     "dev": "next dev --hostname 127.0.0.1",
     "build": "next build",
     "start": "next start --hostname 127.0.0.1",
     "lint": "eslint .",
-    "typecheck": "tsc --noEmit"
+    "typecheck": "tsc --noEmit",
+    "test:auth": "node --test tests/auth-proxy.test.cjs",
+    "test:tasks": "node --test tests/task-cancellation.test.cjs tests/task-composer.test.cjs"
   },
   "dependencies": {
     "@radix-ui/react-dialog": "^1.1.15",

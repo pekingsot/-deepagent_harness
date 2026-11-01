@@ -111,8 +111,8 @@ flowchart TD
 
 ```powershell
 uv sync --locked --group dev
-uv run --locked python scripts/check_structure.py
-uv run --locked python -m unittest discover -s tests/unit -v
+uv run --locked pytest tests/unit/test_architecture.py -q
+uv run --locked pytest tests/unit -q
 uv run --locked harness-api
 ```
 
@@ -242,17 +242,14 @@ Factory 负责构建，Runtime 负责执行，不自己重复实现 Agent 循环
 
 ## 9. 第五步：命令行跑通规划
 
-建议新增 `scripts/demo_planning.py`，依次完成：
+测试入口统一放在 `tests/`，不再新增终端演示脚本。规划行为由 `tests/unit/test_agents.py` 验证：
 
-1. 创建固定的本地开发 `RunContext`。
-2. 创建模型 Provider。
-3. 创建主 Agent 定义。
-4. 创建 Factory 和 Runtime。
-5. 构造现有 `Run`。
-6. 调用 Runtime。
-7. 输出结构化结果。
+1. 构造具有有效租户、用户 ID 的测试上下文。
+2. 使用确定响应的模拟模型创建 Agent，避免真实模型调用费用和不稳定结果。
+3. 执行规划工具调用，并断言计划写入图状态。
+4. 中断、恢复和历史状态由 `tests/unit/test_agent_task_runtime.py` 覆盖。
 
-上下文由脚本创建，不能让模型决定租户、用户或线程身份。
+涉及真实 PostgreSQL、Redis、BGE 或沙箱的验证放在 `tests/integration/`，默认跳过，按 `tests/README.md` 显式启用。
 
 ```mermaid
 flowchart TD
@@ -417,7 +414,7 @@ Checkpoint 不保证所有操作恰好执行一次。恢复可能重放节点，
 | 4 | 规划结果模型、Runtime 契约 | 能表达严格的 Todo 清单 |
 | 5 | AgentFactory 具体实现 | 能构建主 Agent 图 |
 | 6 | `deepagents_adapter.py` | 能执行并转换结果 |
-| 7 | `scripts/demo_planning.py` | 终端打印真实计划 |
+| 7 | `tests/unit/test_agents.py` | 离线验证规划工具与图状态 |
 | 8 | 规划 Application 用例 | 业务编排与 SDK 分离 |
 | 9 | `bootstrap/wiring.py`、`container.py` | 完成依赖组装 |
 | 10 | 规划 API、Schema、路由注册 | HTTP 返回计划 |

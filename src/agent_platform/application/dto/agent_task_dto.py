@@ -2,6 +2,7 @@ from typing import Annotated, Literal
 
 from pydantic import Field, JsonValue
 
+from agent_platform.application.dto.trace_context import TraceContext
 from agent_platform.domain.types.common import (
     Identifier,
     StrictModel,
@@ -58,8 +59,10 @@ class ResumeAgentTask(StrictModel):
 
 
 class TaskJob(StrictModel):
+    trace_context: TraceContext | None = None  # 发送端追踪上下文，旧消息允许为空
     context: TaskContext  # 服务端生成的任务身份和执行上下文
     resume: ResumeAgentTask | None = None  # 为空表示首次执行，否则携带人工回复
+
 
 class TaskPlanItem(StrictModel):
     """提供给页面展示的任务计划项。"""
@@ -71,6 +74,7 @@ class TaskPlanItem(StrictModel):
         "completed",
     ]  # 待执行、执行中、已完成
 
+
 class TaskArtifact(StrictModel):
     """任务生成的文本交付物。"""
 
@@ -79,15 +83,21 @@ class TaskArtifact(StrictModel):
     )  # 虚拟工作区中的交付物路径
     content: str  # 文件的文本内容，用于预览和下载
 
+
 class AgentTaskExecutionResult(StrictModel):
+    title: str | None = Field(
+        default=None, min_length=1, max_length=120
+    )  # 当前轮标题，与会话名称分开
     status: Literal["waiting", "completed"]  # 本轮暂停或完成
     interrupts: tuple[TaskInterrupt, ...] = ()  # 等待处理的人工中断
     output: str | None = None  # 本轮执行后的回答
     todos: tuple[TaskPlanItem, ...] = ()  # 当前任务计划
     artifacts: tuple[TaskArtifact, ...] = ()  # 当前保存的文本交付物
 
+
 class InvalidHumanReplyError(ValueError):
     """人工回复不符合当前中断要求，尚未恢复模型执行。"""
+
 
 class TaskActivity(StrictModel):
     """工具及子 Agent 的调用动态。"""

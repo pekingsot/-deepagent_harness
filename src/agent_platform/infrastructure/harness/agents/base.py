@@ -17,6 +17,9 @@ from langgraph.checkpoint.base import BaseCheckpointSaver
 from langgraph.graph.state import CompiledStateGraph
 
 from agent_platform.domain.types.common import TaskContext
+from agent_platform.infrastructure.harness.middleware.execution_title import (
+    ExecutionTitleMiddleware,
+)
 from agent_platform.infrastructure.model_providers.base import ModelProvider
 
 type AgentGraph = CompiledStateGraph[Any, Any, Any, Any]
@@ -44,7 +47,7 @@ class BaseAgent(ABC):
         if not isinstance(cls, type) or not issubclass(cls, ModelProvider):
             raise TypeError("Agent must declare provider_class inheriting ModelProvider")
         self.tools = list(tools)
-        self.middleware = list(middleware)
+        self.middleware = [ExecutionTitleMiddleware(), *middleware]  # 本轮标题是图执行元数据
         self._backend = backend
         self.subagents = tuple(subagents)
 
@@ -68,7 +71,11 @@ class BaseAgent(ABC):
         return model
 
     def system_prompt(self) -> str:
-        return (self.directory / "system_prompt.md").read_text(encoding="utf-8")
+        return (self.directory / "system_prompt.md").read_text(encoding="utf-8") + (
+            "\n\n每轮新输入开始时，先调用 set_execution_title，结合最新输入及必要上下文，"
+            "用简短标题概括本轮具体要做的事，不要照搬整个会话名称。"
+            "可与 write_todos 在同次回复中调用。本轮已有标题时（包括人工恢复）不要重新命名。"
+        )
 
     def backend(self) -> BackendProtocol:
         # Workspace files are graph-state files. Only this agent's skill resources

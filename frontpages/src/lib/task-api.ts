@@ -1,5 +1,5 @@
-import type { ExecutionResult, HumanReply, StreamEvent, TaskMessage, TaskResponse } from "@/lib/task-types";
-import { isTaskPlanItems } from "@/lib/task-types";
+import type { TaskExecution, ExecutionResult, HumanReply, StreamEvent, TaskMessage, TaskResponse } from "@/lib/task-types";
+import { isTaskExecution, isTaskPlanItems } from "@/lib/task-types";
 
 export class ApiError extends Error {
   constructor(message: string, public status: number) { super(message); }
@@ -7,6 +7,7 @@ export class ApiError extends Error {
 
 async function check(response: Response) {
   if (response.ok) return;
+  if (response.status === 401) window.location.replace("/login");
   let detail = `任务服务返回错误（${response.status}）`;
   try {
     const body = await response.json();
@@ -16,28 +17,35 @@ async function check(response: Response) {
   throw new ApiError(detail, response.status);
 }
 
-async function api<T>(token: string, path: string, options: RequestInit = {}): Promise<T> {
+async function api<T>(path: string, options: RequestInit = {}): Promise<T> {
   const response = await fetch(`/api/backend/tasks${path}`, {
     ...options,
     signal: options.signal
       ? AbortSignal.any([options.signal, AbortSignal.timeout(20_000)])
       : AbortSignal.timeout(20_000),
-    headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json" },
+    headers: { "Content-Type": "application/json" },
     cache: "no-store",
   });
   await check(response);
+  if (response.status === 204 || response.status === 202 && options.method === "DELETE") return undefined as T;
   return response.json() as Promise<T>;
 }
 
 export const taskApi = {
-  list: (token: string, signal?: AbortSignal) => api<TaskResponse[]>(token, "", { signal }),
-  messages: (token: string, id: string, signal?: AbortSignal) => api<TaskMessage[]>(token, `/${id}/messages`, { signal }),
-  send: (token: string, id: string, content: string, messageId: string) => api<TaskResponse>(token, `/${id}/messages`, { method: "POST", body: JSON.stringify({ id: messageId, content }) }),
-  rename: (token: string, id: string, title: string) => api<TaskResponse>(token, `/${id}`, { method: "PATCH", body: JSON.stringify({ title }) }),
-  create: (token: string, prompt: string) => api<TaskResponse>(token, "", { method: "POST", body: JSON.stringify({ agent: "task_planning", prompt }) }),
-  get: (token: string, id: string, signal?: AbortSignal) => api<TaskResponse>(token, `/${id}`, { signal }),
-  execution: async (token: string, id: string, signal?: AbortSignal): Promise<ExecutionResult> => {
-    const result = await api<ExecutionResult>(token, `/${id}/execution`, { signal });
+  delete: (id: string) => api<void>(`/${id}`, { method: "DELETE" }),
+  executions: async (id: string, signal?: AbortSignal): Promise<TaskExecution[]> => {
+    const records = await api<unknown>(`/${id}/executions`, { signal });
+    if (!Array.isArray(records) || !records.every(isTaskExecution)) throw new Error("执行轮次数据格式不正确");
+    return records;
+  },
+  list: (signal?: AbortSignal) => api<TaskResponse[]>("", { signal }),
+  messages: (id: string, signal?: AbortSignal) => api<TaskMessage[]>(`/${id}/messages`, { signal }),
+  send: (id: string, content: string, messageId: string) => api<TaskResponse>(`/${id}/messages`, { method: "POST", body: JSON.stringify({ id: messageId, content }) }),
+  rename: (id: string, title: string) => api<TaskResponse>(`/${id}`, { method: "PATCH", body: JSON.stringify({ title }) }),
+  create: (prompt: string) => api<TaskResponse>("", { method: "POST", body: JSON.stringify({ agent: "task_planning", prompt }) }),
+  get: (id: string, signal?: AbortSignal) => api<TaskResponse>(`/${id}`, { signal }),
+  execution: async (id: string, signal?: AbortSignal): Promise<ExecutionResult> => {
+    const result = await api<ExecutionResult>(`/${id}/execution`, { signal });
     // 校验真实接口数据，避免把缺失或错误的计划误显示为空计划。
     if (!isTaskPlanItems(result.todos)) {
       throw new Error("任务计划数据格式不正确，请确认后端 execution 接口已返回 todos。");
@@ -49,8 +57,8 @@ export const taskApi = {
     }
     return result;
   },
-  resume: (token: string, id: string, answers: Record<string, HumanReply>) => api<TaskResponse>(token, `/${id}/resume`, { method: "POST", body: JSON.stringify({ answers }) }),
-  cancel: (token: string, id: string) => api<TaskResponse>(token, `/${id}/cancel`, { method: "POST" }),
+  resume: (id: string, answers: Record<string, HumanReply>) => api<TaskResponse>(`/${id}/resume`, { method: "POST", body: JSON.stringify({ answers }) }),
+  cancel: (id: string) => api<TaskResponse>(`/${id}/cancel`, { method: "POST" }),
 };
 
 export async function checkBackend(): Promise<void> {
@@ -64,9 +72,9 @@ export async function checkBackend(): Promise<void> {
   }
 }
 
-export async function readTaskEvents(token: string, id: string, cursor: string, signal: AbortSignal, onEvent: (event: StreamEvent) => void, onOpen: () => void) {
+export async function readTaskEvents(id: string, cursor: string, signal: AbortSignal, onEvent: (event: StreamEvent) => void, onOpen: () => void) {
   const response = await fetch(`/api/backend/tasks/${id}/events`, {
-    headers: { Authorization: `Bearer ${token}`, Accept: "text/event-stream", "Last-Event-ID": cursor },
+    headers: { Accept: "text/event-stream", "Last-Event-ID": cursor },
     signal, cache: "no-store",
   });
   await check(response);
@@ -86,6 +94,10 @@ export async function readTaskEvents(token: string, id: string, cursor: string, 
       if (data.length) {
         const payload: unknown = JSON.parse(data.join("\n"));
         if (!payload || typeof payload !== "object" || Array.isArray(payload)) throw new Error("事件数据格式不正确");
+        if (event === "auth_expired") {
+          window.location.replace("/login");
+          throw new ApiError("登录已失效", 401);
+        }
         onEvent({ id: eventId, event, data: payload as Record<string, unknown> });
       }
       event = "message"; eventId = ""; data = [];

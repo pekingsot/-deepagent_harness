@@ -10,9 +10,17 @@ from agent_platform.domain.types.common import TaskContext
 
 class TaskEvents(ABC):
     @abstractmethod
-    async def publish(
-        self, context: TaskContext, event: str, data: dict[str, JsonValue]
-    ) -> str:
+    async def initialize(self, context: TaskContext) -> None:
+        """仅在创建会话时建立事件流，删除后的发布不得重建事件流。"""
+        raise NotImplementedError
+
+    @abstractmethod
+    async def activate(self, context: TaskContext, execution_id: str, *, active: bool) -> None:
+        """切换当前执行标识；关闭后拒绝该执行的流式回调。"""
+        raise NotImplementedError
+
+    @abstractmethod
+    async def publish(self, context: TaskContext, event: str, data: dict[str, JsonValue]) -> str:
         """追加事件并返回事件编号。"""
         raise NotImplementedError
 

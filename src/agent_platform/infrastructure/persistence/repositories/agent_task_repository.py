@@ -1,10 +1,10 @@
-from uuid import UUID
+from datetime import UTC, datetime, timedelta
 from typing import Literal
-from sqlalchemy import select, update
-from agent_platform.domain.types.task_message import TaskMessage
-from agent_platform.infrastructure.persistence.entities.agent_task_messages import (
-    AgentTaskMessageRecord,
-)
+from uuid import UUID
+
+from sqlalchemy import delete, select, update
+from sqlalchemy_transactional.asyncio import current_session
+
 from agent_platform.domain.aggregates.agent_task import (
     AgentTask,
     AgentTaskStatus,
@@ -18,18 +18,110 @@ from agent_platform.domain.types.common import (
     Principal,
     TaskContext,
 )
+from agent_platform.domain.types.task_execution import TaskExecution, TaskExecutionStep
+from agent_platform.domain.types.task_message import TaskMessage
+from agent_platform.infrastructure.persistence.entities.agent_task_executions import (
+    AgentTaskExecutionRecord,
+)
+from agent_platform.infrastructure.persistence.entities.agent_task_messages import (
+    AgentTaskMessageRecord,
+)
 from agent_platform.infrastructure.persistence.entities.agent_tasks import (
     AgentTaskRecord,
 )
-from sqlalchemy_transactional.asyncio import current_session
+
 
 class PostgresAgentTaskRepository(AgentTaskRepository):
     """通过 SQLAlchemy 保存和读取任务聚合。"""
 
+    async def recovery_candidates(self, *, after_id: UUID | None = None) -> list[AgentTask]:
+        records = await current_session().scalars(
+            select(AgentTaskRecord)
+            .where(
+                AgentTaskRecord.status.in_(["running", "cancelling"]),
+                AgentTaskRecord.updated_at < datetime.now(UTC) - timedelta(seconds=60),
+                AgentTaskRecord.id > after_id if after_id is not None else True,
+            )
+            .order_by(AgentTaskRecord.id)
+            .limit(50)
+        )
+        return [self._to_domain(record) for record in records]
+
+    async def pending_deletions(self, *, after_id: UUID | None = None) -> list[AgentTask]:
+        records = await current_session().scalars(
+            select(AgentTaskRecord)
+            .where(
+                AgentTaskRecord.deletion_requested.is_(True),
+                AgentTaskRecord.id > after_id if after_id is not None else True,
+            )
+            .order_by(AgentTaskRecord.id)
+            .limit(50)
+        )
+        return [self._to_domain(record) for record in records]
+
+    async def delete(self, principal: Principal, task_id: UUID) -> None:
+        """通过归属条件删除会话，子记录由外键级联清理。"""
+        # 消息外键没有级联删除，需要显式清理；先通过带归属条件的会话确认所有权。
+        if await self.get(principal, task_id, for_update=True) is None:
+            raise NotFoundError("会话不存在或无权访问")
+        await current_session().execute(
+            delete(AgentTaskMessageRecord).where(AgentTaskMessageRecord.task_id == task_id)
+        )
+        await current_session().execute(
+            delete(AgentTaskRecord).where(
+                AgentTaskRecord.id == task_id, *self._owner_conditions(principal)
+            )
+        )
+
+    async def executions(self, principal: Principal, task_id: UUID) -> list[TaskExecution]:
+        statement = (
+            select(AgentTaskExecutionRecord)
+            .join(AgentTaskRecord, AgentTaskExecutionRecord.task_id == AgentTaskRecord.id)
+            .where(AgentTaskRecord.id == task_id, *self._owner_conditions(principal))
+            .order_by(AgentTaskExecutionRecord.attempt.desc())
+        )
+        records = await current_session().scalars(statement)
+        return [
+            TaskExecution.model_validate(
+                {
+                    **{name: getattr(record, name) for name in TaskExecution.model_fields},
+                    # 数据库存储字符串和 JSON 列表，在仓储边界还原领域类型。
+                    "status": AgentTaskStatus(record.status),
+                    "todos": tuple(TaskExecutionStep.model_validate(item) for item in record.todos),
+                }
+            )
+            for record in records
+        ]
+
+    async def save_execution(
+        self, principal: Principal, task_id: UUID, execution: TaskExecution
+    ) -> None:
+        if await self.get(principal, task_id) is None:
+            raise NotFoundError("会话不存在或无权访问")
+        session = current_session()
+        record = await session.scalar(
+            select(AgentTaskExecutionRecord).where(
+                AgentTaskExecutionRecord.task_id == task_id,
+                AgentTaskExecutionRecord.attempt == execution.attempt,
+            )
+        )
+        if record is None:
+            record = AgentTaskExecutionRecord(task_id=task_id, attempt=execution.attempt)
+            session.add(record)
+        for name, value in execution.model_dump().items():
+            if name == "status":
+                value = execution.status.value
+            setattr(
+                record,
+                name,
+                [item.model_dump() for item in execution.todos] if name == "todos" else value,
+            )
+        await session.flush()
+
     async def save(
-            self,
-            principal: Principal,
-            task: AgentTask,
+        self,
+        principal: Principal,
+        task: AgentTask,
     ) -> None:
         """在调用方的事务中保存任务，不自行提交事务。"""
         self._check_owner(principal, task.context)
@@ -57,18 +149,20 @@ class PostgresAgentTaskRepository(AgentTaskRepository):
             self._check_owner(principal, record)
 
             if (
-                    record.thread_id != task.context.thread_id
-                    or record.trace_id != task.context.trace_id
-                    or record.agent != task.agent
-                    or record.prompt != task.prompt
-                    or record.created_at != task.created_at
+                record.thread_id != task.context.thread_id
+                or record.trace_id != task.context.trace_id
+                or record.agent != task.agent
+                or record.prompt != task.prompt
+                or record.created_at != task.created_at
             ):
                 raise ConflictError("不允许修改已有任务的固定信息")
 
         record.title = task.title
+        record.deletion_requested = task.deletion_requested
         record.status = task.status.value
         record.result = task.result
         record.error = task.error
+        record.execution_id = task.execution_id
         record.attempt = task.attempt
         record.updated_at = task.updated_at
 
@@ -125,11 +219,13 @@ class PostgresAgentTaskRepository(AgentTaskRepository):
                 trace_id=record.trace_id,
             ),
             title=record.title,
+            deletion_requested=record.deletion_requested,
             agent=record.agent,
             prompt=record.prompt,
             status=AgentTaskStatus(record.status),
             result=record.result,
             error=record.error,
+            execution_id=record.execution_id,
             attempt=record.attempt,
             created_at=record.created_at,
             updated_at=record.updated_at,
@@ -153,7 +249,9 @@ class PostgresAgentTaskRepository(AgentTaskRepository):
         """读取当前用户最近更新的会话。"""
         statement = (
             select(AgentTaskRecord)
-            .where(*self._owner_conditions(principal))
+            .where(
+                *self._owner_conditions(principal), AgentTaskRecord.deletion_requested.is_(False)
+            )
             .order_by(
                 AgentTaskRecord.updated_at.desc(),
                 AgentTaskRecord.id,
@@ -164,10 +262,7 @@ class PostgresAgentTaskRepository(AgentTaskRepository):
         session = current_session()
         records = await session.scalars(statement)
 
-        return [
-            self._to_domain(record)
-            for record in records
-        ]
+        return [self._to_domain(record) for record in records]
 
     async def messages(
         self,
@@ -237,7 +332,7 @@ class PostgresAgentTaskRepository(AgentTaskRepository):
         principal: Principal,
         task_id: UUID,
         ids: list[UUID],
-        state: Literal["pending", "processing", "applied", "failed"],
+        state: Literal["pending", "processing", "applied", "failed", "cancelled"],
     ) -> None:
         """只更新当前身份有权访问的会话消息。"""
         if not ids:

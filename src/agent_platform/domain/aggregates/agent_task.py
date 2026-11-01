@@ -3,7 +3,7 @@
 from datetime import UTC, datetime
 from enum import StrEnum
 from typing import Self
-from uuid import UUID
+from uuid import UUID, uuid4
 
 from pydantic import Field, field_validator, model_validator
 
@@ -20,10 +20,11 @@ from agent_platform.domain.types.common import (
 class AgentTaskStatus(StrEnum):
     QUEUED = "queued"  # 已创建，等待执行
     RUNNING = "running"  # 正在执行
+    CANCELLING = "cancelling"  # 已请求取消，等待执行退出
     WAITING_HUMAN = "waiting_human"  # 等待用户输入或审批
     SUCCEEDED = "succeeded"  # 已成功完成
     FAILED = "failed"  # 执行失败
-    CANCELLED = "cancelled"  # 已取消
+    CANCELLED = "cancelled"  # 本轮已停止，会话仍可接收新输入
 
 
 _TRANSITIONS: dict[AgentTaskStatus, frozenset[AgentTaskStatus]] = {
@@ -33,6 +34,7 @@ _TRANSITIONS: dict[AgentTaskStatus, frozenset[AgentTaskStatus]] = {
             AgentTaskStatus.WAITING_HUMAN,
             AgentTaskStatus.SUCCEEDED,
             AgentTaskStatus.FAILED,
+            AgentTaskStatus.CANCELLING,
         }
     ),
     AgentTaskStatus.WAITING_HUMAN: frozenset(
@@ -41,12 +43,15 @@ _TRANSITIONS: dict[AgentTaskStatus, frozenset[AgentTaskStatus]] = {
             AgentTaskStatus.CANCELLED,
         }
     ),
+    AgentTaskStatus.CANCELLING: frozenset({AgentTaskStatus.CANCELLED}),
     # 上一轮成功后，允许同一会话进入下一轮。
-    AgentTaskStatus.SUCCEEDED: frozenset({
-        AgentTaskStatus.QUEUED,
-    }),
-    AgentTaskStatus.FAILED: frozenset(),
-    AgentTaskStatus.CANCELLED: frozenset(),
+    AgentTaskStatus.SUCCEEDED: frozenset(
+        {
+            AgentTaskStatus.QUEUED,
+        }
+    ),
+    AgentTaskStatus.FAILED: frozenset({AgentTaskStatus.QUEUED}),
+    AgentTaskStatus.CANCELLED: frozenset({AgentTaskStatus.QUEUED}),
 }
 
 
@@ -63,6 +68,36 @@ class AgentTask(StrictModel):
     attempt: int = Field(default=0, ge=0)  # 已开始的执行次数，人工恢复不另算一次
     created_at: datetime = Field(default_factory=lambda: datetime.now(UTC))  # 创建时间
     updated_at: datetime = Field(default_factory=lambda: datetime.now(UTC))  # 最近状态变更时间
+
+    deletion_requested: bool = False  # 删除意图；清理失败时保留，禁止重新执行
+
+    execution_id: UUID | None = None  # 每次执行或恢复生成新标识，隔离同一轮次的旧执行
+
+    def ensure_current_execution(self, execution: "AgentTask") -> None:
+        """轮次用于展示，执行标识用于拒绝断线前的迟到回写。"""
+        if (
+            self.id != execution.id
+            or self.attempt != execution.attempt
+            or self.execution_id != execution.execution_id
+        ):
+            raise ConflictError("执行已被替换，拒绝旧执行写入")
+
+    def ensure_not_deleting(self) -> None:
+        """删除中的会话不能接收新工作。"""
+        if self.deletion_requested:
+            raise ConflictError("会话正在永久删除，不能继续操作")
+
+    def request_deletion(self) -> Self:
+        """记录删除意图，清理期间保留归属和取消现场。"""
+        return type(self).model_validate({**self.model_dump(), "deletion_requested": True})
+
+    def ensure_deletable(self) -> None:
+        """执行退出后才允许物理清理。"""
+        if not self.deletion_requested or self.status in {
+            AgentTaskStatus.RUNNING,
+            AgentTaskStatus.CANCELLING,
+        }:
+            raise ConflictError("正在等待执行停止，请稍后重试永久删除")
 
     @property
     def id(self) -> UUID:
@@ -92,25 +127,20 @@ class AgentTask(StrictModel):
 
     def ensure_accepts_messages(self) -> None:
         """判断当前会话是否允许追加普通消息。"""
+        self.ensure_not_deleting()
         if self.status == AgentTaskStatus.WAITING_HUMAN:
-            raise ConflictError(
-                "当前正在等待人工回复，请先回答待处理的问题"
-            )
+            raise ConflictError("当前正在等待人工回复，请先回答待处理的问题")
 
-        if self.status in {
-            AgentTaskStatus.FAILED,
-            AgentTaskStatus.CANCELLED,
-        }:
-            raise ConflictError(
-                "失败或取消的会话暂不支持直接续问"
-            )
+        if self.status == AgentTaskStatus.CANCELLING:
+            raise ConflictError("本轮正在停止，请等待停止完成后重新发送")
 
     def queue_next(self) -> Self:
-        """上一轮成功后，将同一会话重新安排为待执行。"""
+        """上一轮完成、失败或停止后，将同一会话重新安排为待执行。"""
         return self._transition(AgentTaskStatus.QUEUED)
 
     def start(self) -> Self:
         """开始排队中的任务，增加一次执行计数。"""
+        self.ensure_not_deleting()
         if self.status != AgentTaskStatus.QUEUED:
             raise ConflictError("只有排队中的任务可以开始执行")
         return self._transition(AgentTaskStatus.RUNNING, attempt=self.attempt + 1)
@@ -126,6 +156,7 @@ class AgentTask(StrictModel):
 
     def ensure_can_resume(self) -> None:
         """恢复执行前先校验业务条件，不提前改变任务状态。"""
+        self.ensure_not_deleting()
         if self.status != AgentTaskStatus.WAITING_HUMAN:
             raise ConflictError("只有等待人工的任务可以恢复")
 
@@ -147,7 +178,17 @@ class AgentTask(StrictModel):
         return self._transition(AgentTaskStatus.FAILED, error=reason)
 
     def cancel(self) -> Self:
-        """取消排队或等待人工的任务，运行中的任务尚无停止能力。"""
+        """运行中先请求停止；未运行则立即取消，重复请求保持幂等。"""
+        if self.status in {AgentTaskStatus.CANCELLING, AgentTaskStatus.CANCELLED}:
+            return self
+        if self.status == AgentTaskStatus.RUNNING:
+            return self._transition(AgentTaskStatus.CANCELLING)
+        return self._transition(AgentTaskStatus.CANCELLED)
+
+    def confirm_cancelled(self) -> Self:
+        """执行方确认退出后结束取消，不将用户停止记为执行失败。"""
+        if self.status == AgentTaskStatus.CANCELLED:
+            return self
         return self._transition(AgentTaskStatus.CANCELLED)
 
     def _transition(
@@ -170,12 +211,13 @@ class AgentTask(StrictModel):
             attempt=self.attempt if attempt is None else attempt,
             updated_at=datetime.now(UTC),
         )
-        # return type(self).model_validate(data)
-        return self.model_validate(data)
-        # return AgentTask.model_validate(data)
+        if target == AgentTaskStatus.RUNNING:
+            data["execution_id"] = uuid4()
+        return type(self).model_validate(data)
 
     def rename(self, title: str) -> Self:
         """更新展示名称，不改变会话身份或模型上下文。"""
+        self.ensure_not_deleting()
         title = title.strip()
         if not title:
             raise ValueError("会话名称不能为空白")

@@ -8,9 +8,8 @@ worker:
 	uv run harness-worker
 
 check:
-	uv run python scripts/check_structure.py
 	uv run pytest tests -q
-	uv run ruff check src tests migrations scripts/check_structure.py
+	uv run ruff check src tests migrations
 	uv run mypy
 
 upgrade:

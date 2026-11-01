@@ -13,6 +13,7 @@ from redis.asyncio import Redis
 from sqlalchemy import delete
 from sqlalchemy_transactional.asyncio import sessionmaker_context
 
+from agent_platform.application.services.authentication_application_service import AuthenticationApplicationService
 from agent_platform.application.dto.agent_task_dto import AgentTaskExecutionResult
 from agent_platform.application.interfaces.agent_task_runtime import AgentTaskRuntime
 from agent_platform.application.interfaces.task_events import TaskEvents
@@ -26,6 +27,7 @@ from agent_platform.domain.services.agent_task_domain_service import AgentTaskDo
 from agent_platform.domain.types.common import Principal
 from agent_platform.infrastructure.messaging.redis_job_queue import RedisJobQueue
 from agent_platform.infrastructure.persistence.database import Database
+from agent_platform.infrastructure.persistence.task_execution_guard import PostgresTaskExecutionGuard
 from agent_platform.infrastructure.persistence.entities.agent_tasks import AgentTaskRecord
 from agent_platform.infrastructure.persistence.repositories.agent_task_repository import (
     PostgresAgentTaskRepository,
@@ -36,13 +38,13 @@ from agent_platform.workers.agent_task_worker import AgentTaskWorker
 
 
 class IntegrationRuntime(AgentTaskRuntime):
-    async def execute(self, task: AgentTask, *, on_text=None) -> AgentTaskExecutionResult:
+    async def execute(self, task: AgentTask, *, messages=(), restart_after_interruption=False, on_text=None, on_plan=None, on_activity=None, on_title=None) -> AgentTaskExecutionResult:
         return AgentTaskExecutionResult(status="completed", output="PostgreSQL 和 Redis 链路通过")
 
     async def get_state(self, task: AgentTask) -> AgentTaskExecutionResult:
         raise AssertionError("本测试不读取 checkpoint")
 
-    async def resume(self, task, command, *, on_text=None) -> AgentTaskExecutionResult:
+    async def resume(self, task, command, *, on_text=None, on_plan=None, on_activity=None) -> AgentTaskExecutionResult:
         raise AssertionError("本测试不执行人工恢复")
 
 
@@ -81,6 +83,7 @@ class PostgresRedisPipelineTests(unittest.TestCase):
         done = asyncio.Event()
         queue = IntegrationQueue(client=redis, stream_name=stream, group_name="smoke", done=done)
         service = AgentTaskApplicationService(
+            execution_guard=PostgresTaskExecutionGuard(database.engine),
             tasks=AgentTaskDomainService(PostgresAgentTaskRepository()),
             queue=queue,
             runtime=IntegrationRuntime(),
@@ -110,7 +113,8 @@ class PostgresRedisPipelineTests(unittest.TestCase):
                     self.assertEqual(response.status_code, 202, response.text)
                     task_id = response.json()["task_id"]
                     worker = AgentTaskWorker(
-                        session_factory=database.session_factory, queue=queue, service=service
+                        session_factory=database.session_factory, queue=queue, service=service,
+                        authentication=create_autospec(AuthenticationApplicationService, instance=True)
                     )
                     async with start_workers(consume=worker.consume, concurrency=1):
                         await asyncio.wait_for(done.wait(), timeout=10)

@@ -11,6 +11,7 @@ dist/
 work/
 outputs/
 .uv-cache/
+.cache/
 
 # Local IDE settings
 .idea/
@@ -29,3 +30,7 @@ build/
 .coverage.*
 htmlcov/
 coverage.xml
+
+# Downloaded model assets and local document-generation workspace
+/models/
+/.resume_pdf_work/

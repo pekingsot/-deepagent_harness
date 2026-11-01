@@ -1,41 +1,88 @@
 """任务提交和查询入口，具体业务交给应用服务。"""
 
 import json
+import logging
 from collections.abc import AsyncIterator
 from time import monotonic
 from typing import Annotated
 from uuid import UUID
 
 import anyio
-from fastapi import APIRouter, Header, HTTPException, Query, Request, status
+from fastapi import APIRouter, Header, HTTPException, Query, Request, Response, status
 from sse_starlette import EventSourceResponse
 
 from agent_platform.application.dto.agent_task_dto import AgentTaskExecutionResult, ResumeAgentTask
+from agent_platform.application.dto.authentication_dto import AuthenticationError
 from agent_platform.domain.types.common import ConflictError, NotFoundError
 from agent_platform.domain.types.task_message import TaskMessage
 from agent_platform.interface.api.dependencies import (
+    CurrentAuthenticationService,
     CurrentPrincipal,
     CurrentTaskApplicationService,
     CurrentTaskEvents,
+    CurrentToken,
+    CurrentTracing,
 )
 from agent_platform.interface.vo.agent_task_vo import (
     AgentTaskResponse,
     CreateAgentTaskRequest,
     RenameTaskRequest,
     SendTaskMessageRequest,
+    TaskExecutionResponse,
 )
 
 router = APIRouter(prefix="/tasks", tags=["tasks"])
+logger = logging.getLogger(__name__)
+
+
+@router.delete("/{task_id}", status_code=status.HTTP_202_ACCEPTED)
+async def delete_task(
+    task_id: UUID,
+    principal: CurrentPrincipal,
+    service: CurrentTaskApplicationService,
+) -> Response:
+    """永久删除已授权的会话，执行中的任务先停止。"""
+    try:
+        await service.request_deletion(principal, task_id)
+    except NotFoundError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    except ConflictError as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
+    except Exception as exc:
+        logger.exception("会话永久删除未完成，task_id=%s", task_id)
+        raise HTTPException(
+            status_code=503, detail="会话清理尚未完成，请稍后重试永久删除"
+        ) from exc
+    return Response(status_code=status.HTTP_202_ACCEPTED)
+
+
+@router.get("/{task_id}/executions", response_model=list[TaskExecutionResponse])
+async def list_executions(
+    task_id: UUID,
+    principal: CurrentPrincipal,
+    service: CurrentTaskApplicationService,
+) -> list[TaskExecutionResponse]:
+    """读取有权访问的会话历史轮次，不在路由中处理轮次规则。"""
+    try:
+        records = await service.executions(principal, task_id)
+    except NotFoundError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    return [TaskExecutionResponse.from_execution(item) for item in records]
 
 
 @router.post("", response_model=AgentTaskResponse, status_code=status.HTTP_202_ACCEPTED)
 async def create_task(
     request: CreateAgentTaskRequest,
     principal: CurrentPrincipal,
+    response: Response,
+    tracing: CurrentTracing,
     service: CurrentTaskApplicationService,
 ) -> AgentTaskResponse:
     """保存任务后入队，返回编号，由 Worker 异步执行。"""
-    task = await service.create(principal, request.to_command())
+    async with tracing.api("create") as context:
+        task = await service.create(principal, request.to_command())
+        if context:
+            response.headers["X-Trace-ID"] = context.trace_id
     return AgentTaskResponse.from_task(task)
 
 
@@ -59,11 +106,17 @@ async def resume_task(
     task_id: UUID,
     command: ResumeAgentTask,
     principal: CurrentPrincipal,
+    response: Response,
+    tracing: CurrentTracing,
     service: CurrentTaskApplicationService,
 ) -> AgentTaskResponse:
     """人工回复入队，202 表示已接收，执行结果通过 SSE 或查询接口获取。"""
     try:
-        task = await service.request_resume(principal, task_id, command)
+        owned_task = await service.get(principal, task_id)
+        async with tracing.api("resume", task=owned_task) as context:
+            task = await service.request_resume(principal, task_id, command)
+            if context:
+                response.headers["X-Trace-ID"] = context.trace_id
     except NotFoundError as exc:
         raise HTTPException(status_code=404, detail=str(exc)) from exc
     except ConflictError as exc:
@@ -77,7 +130,7 @@ async def cancel_task(
     principal: CurrentPrincipal,
     service: CurrentTaskApplicationService,
 ) -> AgentTaskResponse:
-    """取消排队或等待人工回复的任务；执行中的任务暂不支持强制停止。"""
+    """请求停止任务；运行中先返回停止中，由 Worker 确认取消。"""
     try:
         task = await service.cancel(principal, task_id)
     except NotFoundError as exc:
@@ -94,6 +147,8 @@ async def task_events(
     principal: CurrentPrincipal,
     service: CurrentTaskApplicationService,
     events: CurrentTaskEvents,
+    authentication: CurrentAuthenticationService,
+    token: CurrentToken,
     after: Annotated[str, Query(pattern=r"^\d+-\d+$", max_length=64)] = "0-0",
     last_event_id: Annotated[
         str | None, Header(alias="Last-Event-ID", pattern=r"^\d+-\d+$", max_length=64)
@@ -109,9 +164,17 @@ async def task_events(
 
     async def stream() -> AsyncIterator[dict[str, str]]:
         cursor = last_event_id or after
+        last_auth_check = monotonic()  # 长连接也需定期确认会话仍然有效
         last_status_check = monotonic()  # 空闲时每隔一段时间查询业务状态
         # 客户端断开由 SSE 组件检测，避免两个协程同时读取断连消息。
         while not shutdown_event.is_set():
+            if monotonic() - last_auth_check >= 15:
+                try:
+                    await authentication.authenticate(token)
+                except AuthenticationError:
+                    yield {"event": "auth_expired", "data": "{}"}
+                    return
+                last_auth_check = monotonic()
             batch = await events.read(task.context, cursor, block_ms=1000)
             if shutdown_event.is_set():
                 break
@@ -138,6 +201,7 @@ async def task_events(
                         {
                             "attempt": current.attempt,
                             "status": current.status.value,
+                            "updated_at": current.updated_at.isoformat(),
                             "output": current.result,
                             "error": current.error,
                         },
@@ -164,7 +228,7 @@ async def get_task(
 ) -> AgentTaskResponse:
     """查询本人任务，未知编号和无权限均返回 404。"""
     try:
-        task = await service.get(principal, task_id)
+        task = await service.open_task(principal, task_id)
     except NotFoundError as exc:
         raise HTTPException(status_code=404, detail="任务不存在或无权访问") from exc
     return AgentTaskResponse.from_task(task)
@@ -198,11 +262,17 @@ async def send_message(
     task_id: UUID,
     request: SendTaskMessageRequest,
     principal: CurrentPrincipal,
+    response: Response,
+    tracing: CurrentTracing,
     service: CurrentTaskApplicationService,
 ) -> AgentTaskResponse:
     """追加同一会话的消息，执行中收到的补充先入库排队。"""
     try:
-        task = await service.send_message(principal, task_id, request.id, request.content)
+        owned_task = await service.get(principal, task_id)
+        async with tracing.api("message", task=owned_task, message_id=str(request.id)) as context:
+            task = await service.send_message(principal, task_id, request.id, request.content)
+            if context:
+                response.headers["X-Trace-ID"] = context.trace_id
     except NotFoundError as exc:
         raise HTTPException(status_code=404, detail=str(exc)) from exc
     except ConflictError as exc:

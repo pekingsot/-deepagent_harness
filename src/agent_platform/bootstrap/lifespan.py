@@ -10,12 +10,15 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     """按配置随 API 启动消费者，先停消费者再释放共享资源。"""
     from contextlib import AsyncExitStack
 
+    from agent_platform.bootstrap.authentication import get_authentication_application_service
     from agent_platform.bootstrap.wiring import (
         get_agent_task_application_service,
         get_task_queue,
+        get_tracing,
         open_container,
     )
     from agent_platform.workers.agent_task_worker import AgentTaskWorker
+    from agent_platform.workers.task_maintenance_worker import TaskMaintenanceWorker
 
     async with open_container() as container:
         app.state.container = container
@@ -27,13 +30,20 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
                     worker = AgentTaskWorker(
                         session_factory=container.database.session_factory,
                         queue=get_task_queue(),
-                        service=get_agent_task_application_service(
-                            runtime=container.runtime,
-                        ),
+                        tracing=get_tracing(),
+                        authentication=get_authentication_application_service(),
+                        service=get_agent_task_application_service(),
                     )
                     await stack.enter_async_context(
                         start_workers(consume=worker.consume, concurrency=1)
                     )
+                maintenance = TaskMaintenanceWorker(
+                    service=get_agent_task_application_service(),
+                    session_factory=container.database.session_factory,
+                )
+                await stack.enter_async_context(
+                    start_workers(consume=maintenance.consume, concurrency=1)
+                )
                 yield
         finally:
             del app.state.container
