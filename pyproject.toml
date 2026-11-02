@@ -7,6 +7,8 @@ name = "deepagent-enterprise-harness"
 version = "0.1.0"
 description = "Tenant-scoped DeepAgents enterprise harness"
 readme = "README.md"
+license = "0BSD"
+license-files = ["LICENSE"]
 requires-python = ">=3.12,<3.13"
 dependencies = [
     "deepagents>=0.7.32,<0.8",
@@ -81,3 +83,6 @@ mypy_path = "src"
 testpaths = ["tests"]
 pythonpath = ["src"]
 filterwarnings = ["error::DeprecationWarning:agent_platform.*"]
+log_cli = true
+log_cli_level = "INFO"
+

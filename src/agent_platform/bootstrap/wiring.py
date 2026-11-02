@@ -86,6 +86,9 @@ def _build_runtime(
     memory_service = create_user_memory_application_service()
     memory_tools = create_user_memory_tools(memory_service)
 
+
+
+
     agents: dict[str, BaseAgent] = {
         TaskPlanningAgent.name: TaskPlanningAgent(
             tools=[

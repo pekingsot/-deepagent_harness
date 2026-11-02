@@ -1,5 +1,15 @@
 # DeepAgent Enterprise Harness
 
+[![License: 0BSD](https://img.shields.io/badge/License-0BSD-blue.svg)](LICENSE)
+
+> **架构背景：基于 Java DDD 目录与职责划分组织的 Python 项目。** 作者从 Java 后端开发转向 Python，本项目的领域目录、分层方式和命名约定参考 Java 生态中常见的 DDD 实践，优先采用清晰的职责边界与显式接口契约。
+
+**Java DDD 风格的领域结构：** 以 `domain/aggregates`、`domain/types`、`domain/services` 和 `domain/repositories` 组织聚合、领域类型、领域服务与仓储抽象；`application/services` 编排用例和事务，`application/dto` 表达用例输入输出；仓储及 ORM 实现放在 `infrastructure/persistence`，HTTP 与 VO 放在 `interface`，依赖装配放在 `bootstrap`。领域层不依赖数据库、Web 或 Agent 框架，应用层面向抽象使用外部能力。
+
+**ABC 与显式继承约束：** 自定义核心扩展点采用 `ABC`、`@abstractmethod` 和显式继承，例如 `BaseAgent`、`ModelProvider`、`AgentTaskRuntime`；实现类必须实现抽象方法才能实例化，关键注入点结合 `isinstance` / `issubclass` 校验实现关系，不以“恰好有同名方法”的鸭子类型作为这些接口的接入依据。类型注解和参数校验进一步表达与检查契约；ABC 本身不替代方法签名、类型和业务行为的验证。
+
+这一原则针对采用 ABC 的核心接口，并非宣称全项目完全排除结构类型：例如向量能力 `TextEmbeddings` 使用 `Protocol`，第三方框架也遵循各自的接口机制。项目借鉴 Java 的职责划分，不机械复制 Java 的类数量：不为单一实现额外拆分接口与 `Impl`，不为每张表建立聚合，也不让个别 Agent 的特殊能力扩张上层公共接口。
+
 面向企业内部使用的 AI 任务执行平台。用户登录后，在同一个工作会话中提交目标、补充要求、回答 Agent 提问，查看计划、执行动态和交付文件；服务端通过任务队列驱动 Agent 执行，并将进展持续推送到页面。
 
 后端采用 Python、FastAPI 和 DDD 分层，Agent 执行由 DeepAgents、LangGraph 承担。前端采用 Next.js App Router、React、TypeScript 和 shadcn/ui。PostgreSQL 保存业务数据和用户长期记忆，pgvector 提供向量检索，Redis 承担任务队列、执行事件、登录会话及默认 Checkpoint，Langfuse 记录执行链路。
@@ -7,6 +17,8 @@
 当前主业务是**长任务规划与执行**。独立普通聊天、企业知识库 RAG、隔离代码执行沙箱和对象存储尚未接入主流程。
 
 ## 目录
+
+- [开源协议](#开源协议)
 
 - [当前能力](#当前能力)
 - [技术栈](#技术栈)
@@ -1038,3 +1050,11 @@ npm.cmd run build
 所有 Python 测试统一放在根目录 `tests/`：`tests/unit/` 为离线单元测试，`tests/integration/` 为显式启用的真实依赖验证。`scripts/` 不再放演示或测试代码。
 
 运行 `uv run pytest tests/unit -q` 验证单元测试；运行 `uv run pytest tests -q` 收集全部测试，未启用的集成测试默认跳过。配置方式见 [测试说明](tests/README.md)。
+
+## 开源协议
+
+本项目原创代码采用 [BSD Zero Clause License（0BSD）](LICENSE)。你可以自由使用、复制、修改和再分发，包括商业使用、收费分发及闭源集成；不要求署名、保留许可证副本或公开修改后的源码。
+
+软件按原样提供，不附带担保，具体授权和免责条款以根目录 `LICENSE` 为准。
+
+本协议不替代第三方依赖、模型权重、数据集及外部素材各自的许可证。使用或分发这些内容时，仍须遵守对应授权要求。

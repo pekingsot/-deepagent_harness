@@ -3,8 +3,8 @@ from pathlib import Path
 from typing import ClassVar
 
 from deepagents import create_deep_agent
-from langchain.agents.middleware import TodoListMiddleware
-from langchain.agents.middleware.summarization import SummarizationMiddleware
+from langchain.agents.middleware import TodoListMiddleware,HumanInTheLoopMiddleware
+from deepagents.middleware.summarization import SummarizationMiddleware
 from agent_platform.domain.types.common import TaskContext
 from agent_platform.infrastructure.harness.agents.base import AgentGraph, BaseAgent
 from agent_platform.infrastructure.harness.middleware.custom_model_call_limit import (
@@ -45,19 +45,20 @@ class TaskPlanningAgent(BaseAgent):
         return self.fallback_provider_class()
 
     def build(self, context: TaskContext) -> AgentGraph:
+        backend=self.backend()
         return create_deep_agent(
             name=self.name,
             model=self.model(context),
             system_prompt=self.system_prompt(),
             tools=self.tools,
             middleware=[
-                SummarizationMiddleware(
-                    model=self.model(context),
-                    backend=self.backend,
-                    trigger=("tokens", 16000),  # 估算上下文达到此阈值时触发压缩
-                    keep=("tokens", 4000),  # 保留近期消息的 token 预算
-                    trim_tokens_to_summarize=None,  # 不预先裁掉待摘要的旧历史
-                ),
+                # SummarizationMiddleware(
+                #     model=self.model(context),
+                #     backend=self.backend(),
+                #     trigger=("tokens", 16000),  # 估算上下文达到此阈值时触发压缩
+                #     keep=("tokens", 4000),  # 保留近期消息的 token 预算
+                #     trim_tokens_to_summarize=None,  # 不预先裁掉待摘要的旧历史
+                # ),
                 # HumanApprovalMiddleware(approval_tools={"write_todos"}),
                 CustomModelCallLimitMiddleware(max_calls=10),
                 CustomToolCallLimitExceededMiddleware(max_calls=20, tool_limits={}),
@@ -66,11 +67,12 @@ class TaskPlanningAgent(BaseAgent):
                 CustomModelFallbackMiddleware(
                     fallback_model=self.fallback_provider.get_model(context)
                 ),
+                # HumanInTheLoopMiddleware()
                 CustomModelRetryMiddleware(),
                 TodoListMiddleware(),
                 *self.middleware,
             ],
-            backend=self.backend(),
+            backend=backend,
             permissions=self.permissions(),
             skills=["/skills/"],
             subagents=[agent.as_subagent(context) for agent in self.subagents],

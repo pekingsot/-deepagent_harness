@@ -34,3 +34,8 @@ coverage.xml
 # Downloaded model assets and local document-generation workspace
 /models/
 /.resume_pdf_work/
+
+# Personal resumes and local resume-generation files
+/*_简历_*.md
+/*.docx
+/.resume_work/
